@@ -660,10 +660,10 @@ func TestGetCACert(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		client := fake.NewSimpleClientset()
+		client := initFakeKubeClient(t, []byte(exampleIssuedCert))
 		// If the CA cert. is invalid, NewWebhookController will fail.
 		wc, err := NewWebhookController(tc.gracePeriodRatio, tc.minGracePeriod,
-			client,
+			client.Kube(),
 			tc.k8sCaCertFile, tc.secretNames, tc.dnsNames, tc.secretNamespace, "test-issuer")
 		if err != nil {
 			t.Fatalf("failed at creating webhook controller: %v", err)
@@ -673,7 +673,7 @@ func TestGetCACert(t *testing.T) {
 		if !tc.expectFail {
 			if err != nil {
 				t.Errorf("failed to get CA cert: %v", err)
-			} else if !bytes.Equal(cert, []byte(exampleCACert1)) {
+			} else if !bytes.Equal(cert, []byte(exampleCACert)) {
 				t.Errorf("the CA certificate read does not match the actual certificate")
 			}
 		} else if err == nil {
