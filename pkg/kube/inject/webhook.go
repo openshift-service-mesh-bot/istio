@@ -919,7 +919,10 @@ func (wh *Webhook) inject(ar *kube.AdmissionReview, path string) *kube.Admission
 				proxyGID = pointer.Int64Ptr(*container.SecurityContext.RunAsGroup)
 			}
 		}
-	} else if !tproxyInterceptionMode {
+	} else if tproxyInterceptionMode {
+		proxyUID = pointer.Int64(0)
+		proxyGID = pointer.Int64(DefaultSidecarProxyGID)
+	} else {
 		// we're injecting a normal pod (with app container and optional sidecar container)
 		// we set proxyUID to the main app container's UID incremented by 1
 		// we set proxyGID to the main app container's UID
@@ -949,13 +952,11 @@ func (wh *Webhook) inject(ar *kube.AdmissionReview, path string) *kube.Admission
 
 	// We need to set the UID/GID to something, or the injected manifest will fail to parse (this happens because
 	// {{ .ProxyUID/GID }} in the charts get resolved to "nil" (with quotes), which can't be parsed as a float).
-	if !tproxyInterceptionMode { // because the proxy must run as root in TPROXY mode, we must leave the proxyUID unset
-		if proxyUID == nil {
-			proxyUID = pointer.Int64Ptr(DefaultSidecarProxyUID)
-		}
-		if proxyGID == nil {
-			proxyGID = pointer.Int64Ptr(DefaultSidecarProxyUID)
-		}
+	if proxyUID == nil {
+		proxyUID = pointer.Int64(DefaultSidecarProxyUID)
+	}
+	if proxyGID == nil {
+		proxyGID = pointer.Int64(DefaultSidecarProxyUID)
 	}
 
 	deploy, typeMeta := kube.GetDeployMetaFromPod(&pod)
@@ -1131,20 +1132,22 @@ func replaceProxyRunAsUserID(pod *corev1.Pod, proxyUID *int64) {
 	if proxyUID == nil {
 		return
 	}
-	for i, c := range pod.Spec.InitContainers {
-		if c.Name == InitContainerName || c.Name == ValidationContainerName {
-			for j, arg := range c.Args {
-				if arg == "-u" {
-					pod.Spec.InitContainers[i].Args[j+1] = strconv.FormatInt(*proxyUID, 10)
-					break
+	if *proxyUID != 0 {
+		for i, c := range pod.Spec.InitContainers {
+			if c.Name == InitContainerName || c.Name == ValidationContainerName {
+				for j, arg := range c.Args {
+					if arg == "-u" {
+						pod.Spec.InitContainers[i].Args[j+1] = strconv.FormatInt(*proxyUID, 10)
+						break
+					}
 				}
-			}
-			if c.Name == ValidationContainerName {
-				if c.SecurityContext == nil {
-					securityContext := corev1.SecurityContext{}
-					pod.Spec.InitContainers[i].SecurityContext = &securityContext
+				if c.Name == ValidationContainerName {
+					if c.SecurityContext == nil {
+						securityContext := corev1.SecurityContext{}
+						pod.Spec.InitContainers[i].SecurityContext = &securityContext
+					}
+					pod.Spec.InitContainers[i].SecurityContext.RunAsUser = proxyUID
 				}
-				pod.Spec.InitContainers[i].SecurityContext.RunAsUser = proxyUID
 			}
 		}
 	}
